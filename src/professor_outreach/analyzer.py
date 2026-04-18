@@ -1,6 +1,5 @@
 import json
-import textwrap
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, Field
 from langchain_community.chat_models import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
@@ -9,57 +8,6 @@ from src.utils.logger import get_logger
 from src.utils.json_parser import extract_json_from_text
 
 logger = get_logger(__name__)
-
-
-def justify_text(text: str, width: int = 72) -> str:
-    """Justify a single paragraph to a fixed column width."""
-    words = text.split()
-    lines, current_line, current_length = [], [], 0
-
-    for word in words:
-        if current_length + len(word) + len(current_line) <= width:
-            current_line.append(word)
-            current_length += len(word)
-        else:
-            lines.append(current_line)
-            current_line = [word]
-            current_length = len(word)
-    if current_line:
-        lines.append(current_line)
-
-    justified_lines = []
-    for i, line in enumerate(lines):
-        if len(line) == 1 or i == len(lines) - 1:
-            justified_lines.append(" ".join(line))
-        else:
-            total_spaces = width - sum(len(w) for w in line)
-            gaps = len(line) - 1
-            space, extra = divmod(total_spaces, gaps)
-            justified_line = ""
-            for j, word in enumerate(line[:-1]):
-                justified_line += word + " " * (space + (1 if j < extra else 0))
-            justified_line += line[-1]
-            justified_lines.append(justified_line)
-
-    return "\n".join(justified_lines)
-
-
-def justify_block(text: str, width: int = 72) -> str:
-    """Justify a full email body, preserving blank lines and list items."""
-    result = []
-    for line in text.split("\n"):
-        stripped = line.strip()
-        # Preserve blank lines, numbered lists, bullet points, and short lines
-        if (
-            not stripped
-            or stripped[0].isdigit() and stripped[1:3] in (". ", ") ")
-            or stripped.startswith(("-", "*", "•"))
-            or len(stripped) < width // 2
-        ):
-            result.append(line)
-        else:
-            result.append(justify_text(stripped, width))
-    return "\n".join(result)
 
 
 class ProfessorAnalysis(BaseModel):
@@ -105,7 +53,7 @@ class ProfessorAnalyzer:
 
         prompt = ChatPromptTemplate.from_messages([
             ("system", "You are an expert academic advisor. "
-                      "Output ONLY raw JSON no markdown."),
+                       "Output ONLY raw JSON no markdown."),
             ("human", """
 STUDENT:
 Name: {student_name}
@@ -173,47 +121,36 @@ Return ONLY this JSON:
         )
 
     def _build_publication_summary(self) -> str:
-        """Build numbered publication summary from student data."""
+        """Build publication summary from student profile."""
         pubs = self.student.get("publications", [])
 
-        # Use pre-defined summary counts if available in student profile
-        pub_summary = self.student.get("publication_summary", {})
-        if pub_summary:
-            q1 = pub_summary.get("q1_published", 0)
-            revision = pub_summary.get("under_revision", 0)
-            conference = pub_summary.get("conference_published", 0)
-        else:
-            # Derive counts from publications list
-            q1 = sum(
-                1 for p in pubs
-                if "Q1" in p.get("journal", "") or "q1" in p.get("status", "").lower()
-            )
-            revision = sum(
-                1 for p in pubs
-                if "revision" in p.get("status", "").lower()
-            )
-            conference = sum(
-                1 for p in pubs
-                if "conference" in p.get("journal", "").lower()
-                or "proceedings" in p.get("journal", "").lower()
-                or "symposium" in p.get("journal", "").lower()
-            )
-            # Fallback: total published minus revision/conference = Q1
-            if q1 == 0:
-                published = sum(
-                    1 for p in pubs
-                    if "published" in p.get("status", "").lower()
-                    and "conference" not in p.get("journal", "").lower()
-                    and "proceedings" not in p.get("journal", "").lower()
-                )
-                q1 = published
+        published = sum(
+            1 for p in pubs
+            if "Published" in p.get("status", "")
+            and "Conference" not in p.get("type", "")
+            and "Proceedings" not in p.get("journal", "")
+        )
+        revision = sum(
+            1 for p in pubs
+            if "Revision" in p.get("status", "")
+            or "Processing" in p.get("status", "")
+        )
+        conference = sum(
+            1 for p in pubs
+            if p.get("type", "") == "Conference Proceedings"
+            or "Proceedings" in p.get("journal", "")
+            or "Symposium" in p.get("journal", "")
+        )
 
-        lines = [
-            f"1. Q1 Journal: {q1} (Published)",
-            f"2. Journal under revision: {revision}",
-            f"3. Conference: {conference} (Published)",
-        ]
-        return "\n".join(lines)
+        lines = []
+        if published:
+            lines.append(f"Q1 Journal: {published} (published)")
+        if revision:
+            lines.append(f"Journal under revision: {revision}")
+        if conference:
+            lines.append(f"Conference: {conference} Published")
+
+        return "\n".join(lines) if lines else "Q1 Journal: 1 (published)"
 
     def generate_email(
         self,
@@ -223,12 +160,15 @@ Return ONLY this JSON:
         intake: str = "Fall 2026",
         manual_publications: str = ""
     ) -> ProfessorEmailDraft:
-        """Generate SHORT precise email (100-150 words max)."""
+        """Generate email following exact preferred format."""
 
         prof_name = analysis.professor_name or professor_data.get("name", "Professor")
-        prof_university = analysis.university or professor_data.get("university", "your institution")
+        prof_university = (
+            analysis.university
+            or professor_data.get("university", "your institution")
+        )
 
-        # Clean salutation
+        # Clean salutation - remove titles
         salutation = prof_name
         for prefix in ["Prof. ", "Dr. ", "Professor ", "Doctor "]:
             salutation = salutation.replace(prefix, "")
@@ -237,36 +177,42 @@ Return ONLY this JSON:
         # App type display
         app_display = "PhD" if app_type == "PHD" else "Master's"
 
-        # Research areas - unique only
+        # Research areas - remove duplicates
         research_areas = list(dict.fromkeys(
             analysis.professor_research_areas
             or analysis.matching_points
             or professor_data.get("research_interests", [])
         ))
-        research_text = ", ".join(research_areas[:3]) if research_areas else "your research areas"
+        research_text = (
+            ", ".join(research_areas[:3])
+            if research_areas
+            else "your research areas"
+        )
 
-        # Student matching research - different from prof areas
-        student_research = ", ".join(
-            analysis.matching_points[:2]
-        ) if analysis.matching_points else "deep learning and explainable AI"
-
-        # Paper mention
+        # Paper and journal mention
         specific_paper = analysis.specific_paper or ""
         specific_journal = analysis.specific_journal or ""
 
         clean_paper = specific_paper
         if specific_journal and specific_journal in clean_paper:
-            clean_paper = clean_paper.replace(f" - {specific_journal}", "").strip()
+            clean_paper = clean_paper.replace(
+                f" - {specific_journal}", ""
+            ).strip()
 
         if clean_paper and specific_journal:
             paper_line = (
-                f"I came across your work \"{clean_paper}\" "
-                f"published in {specific_journal}."
+                f'In your research profile, I saw your latest research article '
+                f'published in the {specific_journal}. '
+                f'The title is "{clean_paper}".'
             )
         elif clean_paper:
-            paper_line = f"I came across your work \"{clean_paper}\"."
+            paper_line = (
+                f'In your research profile, I saw your work titled "{clean_paper}".'
+            )
         else:
-            paper_line = f"Your research on {research_text} deeply interests me."
+            paper_line = (
+                f'In your research profile, I saw your work on {research_text}.'
+            )
 
         # Program text
         if app_type == "PHD":
@@ -277,44 +223,53 @@ Return ONLY this JSON:
         else:
             program_text = (
                 f"apply for the {app_display} program at {prof_university} "
-                f"under your supervision for {intake}"
+                f"under your supervision for the {intake} intake"
             )
 
-        # Numbered publication summary
-        pubs_short = manual_publications.strip() if manual_publications.strip() \
+        # Publication summary
+        pub_summary = (
+            manual_publications.strip()
+            if manual_publications.strip()
             else self._build_publication_summary()
+        )
 
-        # Generate subject
+        # Subject line
         subject = self._generate_subject(research_areas, app_type, prof_university)
 
-        # Profile overview section
-        profile_overview = (
-            f"Here is a brief profile overview:\n\n"
-            f"B.Sc. in Computer Science and Engineering, Daffodil International University, "
-            f"Bangladesh (May 2022 – April 2026), CGPA: {self.student['cgpa']}\n"
-            f"Erasmus+ Exchange Semester, Mälardalen University, Sweden (Jan 2025 – Jun 2025)\n"
-            f"Current Position: Teaching Assistant, Department of CSE, DIU (October 2025 – Present)\n\n"
-            f"Publications:\n{pubs_short}"
-        )
+        # Build email body - exact preferred format
+        student_name = self.student["name"]
+        student_cgpa = self.student["cgpa"]
 
-        # Build STRICT 150-word email
         body = (
             f"Dear Professor {salutation},\n\n"
-            f"Good day. I am {self.student['name']}, a final-year B.Sc. student "
-            f"and Teaching Assistant at Daffodil International University (DIU), "
-            f"Bangladesh (CGPA: {self.student['cgpa']}), expecting to graduate in "
-            f"April 2026. I wish to {program_text}.\n\n"
-            f"{paper_line} Your work on {research_text} aligns closely with my "
-            f"research in {student_research}. I am enthusiastic about contributing "
-            f"to your research group.\n\n"
-            f"I completed an Erasmus+ Exchange at Mälardalen University, Sweden "
-            f"(Jan–Jun 2025). I have attached my CV and transcript for your reference. "
-            f"I would be honored to discuss further via Zoom or Google Meet at your convenience.\n\n"
-            f"Thank you for your time and consideration.\n\n"
-            f"{profile_overview}"
+            f"Good day. I am {student_name}, an undergraduate B.Sc. student "
+            f"& Teaching Assistant in Computer Science and Engineering at "
+            f"Daffodil International University (DIU), Bangladesh, expecting "
+            f"to graduate in April 2026. I wish to {program_text}.\n\n"
+            f"{paper_line} Also, you are working on {research_text}. "
+            f"This inspires me to work under your supervision as a "
+            f"{app_display} student. I have some research experience and "
+            f"publications in deep learning, computer vision, and explainable "
+            f"AI. I am enthusiastic about conducting research under your "
+            f"supervision.\n\n"
+            f"Thank you for considering my application. I am genuinely excited "
+            f"about the possibility of joining your research group. I look "
+            f"forward to discussing my research plan further and am available "
+            f"for a Zoom or Google Meet chat at your convenience.\n\n"
+            f"Here is a brief profile overview:\n\n"
+            f"B.Sc. in Computer Science and Engineering, Daffodil International "
+            f"University, Bangladesh (May 2022 – April 2026), "
+            f"CGPA: {student_cgpa}\n\n"
+            f"Erasmus+ Exchange Semester, Mälardalen University, Sweden "
+            f"(Jan 2025 – Jun 2025)\n\n"
+            f"Current Position: Teaching Assistant, Department of CSE, DIU "
+            f"(October 2025 – Present)\n\n"
+            f"Publications:\n"
+            f"{pub_summary}\n\n"
+            f"I have attached my CV and transcript for your reference."
         )
 
-        full_body = justify_block(body) + "\n\n" + self.student["signature"]
+        full_body = body + "\n\n" + self.student["signature"]
 
         logger.info(f"Email generated: {subject}")
         return ProfessorEmailDraft(subject=subject, body=full_body)
@@ -328,19 +283,19 @@ Return ONLY this JSON:
         """Generate AI subject line."""
         prompt = ChatPromptTemplate.from_messages([
             ("system", "Generate ONE short professional email subject line. "
-                      "Output ONLY the subject text."),
+                       "Output ONLY the subject text, nothing else."),
             ("human", """
 Applying for: {app_type}
 University: {university}
 Professor research: {research}
-Student: Deep Learning, Computer Vision, Explainable AI
+Student background: Deep Learning, Computer Vision, Explainable AI
 
 Write ONE subject line max 10 words.
 Examples:
 - Prospective PhD Student - Explainable AI Research Inquiry
 - Masters Inquiry - Computer Vision and Medical Imaging
 
-Output only the subject:""")
+Output only the subject line:""")
         ])
 
         try:
@@ -350,7 +305,13 @@ Output only the subject:""")
                 "research": ", ".join(research_areas[:3])
             })
             subject = response.content.strip().replace('"', '').replace("'", '')
-            return subject[:100]
-        except:
+            if len(subject) > 100:
+                subject = subject[:100]
+            return subject
+        except Exception as e:
+            logger.error(f"Subject generation error: {e}")
             top = research_areas[0] if research_areas else "Research"
-            return f"Prospective {'PhD' if app_type == 'PHD' else 'Masters'} Student - {top}"
+            return (
+                f"Prospective {'PhD' if app_type == 'PHD' else 'Masters'} "
+                f"Student - {top}"
+            )
