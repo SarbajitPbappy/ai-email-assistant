@@ -3,8 +3,8 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Union
 import PyPDF2
 from langchain_community.chat_models import ChatOllama
-from langchain.prompts import ChatPromptTemplate
-from langchain.output_parsers import PydanticOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import PydanticOutputParser
 from pydantic import BaseModel, Field, field_validator
 from config.settings import settings
 from src.utils.logger import get_logger

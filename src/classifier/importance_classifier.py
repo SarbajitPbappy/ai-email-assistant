@@ -2,8 +2,8 @@ from typing import Dict, Any, List
 from pydantic import BaseModel, Field
 from langchain_community.chat_models import ChatOllama
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.prompts import ChatPromptTemplate
-from langchain.output_parsers import PydanticOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import PydanticOutputParser
 from config.settings import settings
 from src.utils.logger import get_logger
 

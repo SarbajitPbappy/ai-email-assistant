@@ -14,14 +14,6 @@ logger = get_logger(__name__)
 
 
 class UnifiedBot:
-    """
-    Single bot that handles ALL functions:
-    - Email processing
-    - Job matching
-    - Reply management
-    - Professor outreach
-    """
-
     def __init__(self):
         print("🤖 Initializing AI Personal Assistant...")
         self.gmail = GmailClient()
@@ -29,8 +21,9 @@ class UnifiedBot:
         self.professor_handler = ProfessorTelegramHandler(self.gmail.service)
         self.db = Database()
 
-        # Email reply tracking
-        self.pending_email_replies = {}
+        # Reply queue - list of pending replies
+        self.reply_queue = []
+        self.current_reply = None
 
         print("✅ All modules ready!")
 
@@ -40,25 +33,24 @@ class UnifiedBot:
         print("🤖 Bot is running. Listening for Telegram commands...")
         print("Press CTRL+C to stop.")
 
-        # Start email auto-check in background
+        # Start auto email check in background
         email_thread = threading.Thread(
             target=self._auto_email_check,
             daemon=True
         )
         email_thread.start()
 
-        # Main loop - listen for Telegram messages
+        # Main loop
         while True:
             try:
                 updates = self.telegram.get_updates()
-
                 for update in updates:
                     message = update.get("message", {})
                     text = message.get("text", "").strip()
                     chat_id = str(message.get("chat", {}).get("id", ""))
 
                     if chat_id == str(settings.TELEGRAM_CHAT_ID) and text:
-                        print(f"📩 Received: {text[:80]}")
+                        print(f"📩 Received: {text[:60]}")
                         self._handle_command(text)
 
                 time.sleep(3)
@@ -68,86 +60,279 @@ class UnifiedBot:
                 break
             except Exception as e:
                 logger.error(f"Bot error: {e}")
-                import traceback
-                logger.error(traceback.format_exc())
                 time.sleep(5)
 
     def _handle_command(self, text: str):
-        """Route command to the right handler."""
+        """Route command to correct handler."""
         upper = text.upper().strip()
 
         # START / HELP
-        if upper == "START" or upper == "/START":
+        if upper in ["START", "/START"]:
             self.telegram.send_message(START_MESSAGE)
             return
 
-        if upper == "HELP" or upper == "/HELP":
+        if upper in ["HELP", "/HELP"]:
             self.telegram.send_message(HELP_MESSAGE)
             return
 
-        # CHECK - process emails now
+        # CHECK
         if upper == "CHECK":
             self._handle_check()
             return
 
-        # JOBS - show recent job matches
+        # JOBS
         if upper == "JOBS":
             self._handle_jobs()
             return
 
-        # REPLIES - show pending replies
+        # REPLIES
         if upper == "REPLIES":
-            self._handle_replies()
+            self._handle_show_replies()
             return
 
-        # STATUS - daily stats
+        # STATUS
         if upper == "STATUS":
             self._handle_status()
             return
 
-        # Professor outreach commands
+        # SKIP - skip current reply in queue
+        if upper == "SKIP":
+            self._handle_skip()
+            return
+
+        # YES - approve current reply
+        if upper == "YES" and self.current_reply:
+            self._handle_yes()
+            return
+
+        # NO - discard current reply
+        if upper == "NO" and self.current_reply:
+            self._handle_no()
+            return
+
+        # EDIT:
+        if upper.startswith("EDIT:") and self.current_reply:
+            self._handle_edit(text[5:].strip())
+            return
+
+        # Professor commands
         if self.professor_handler.handle_message(
             text,
             send_func=self.telegram.send_message
         ):
             return
 
-        # YES/NO/EDIT for email replies
-        if upper == "YES" and self.pending_email_replies:
-            self._handle_email_yes()
-            return
-
-        if upper == "NO" and self.pending_email_replies:
-            self._handle_email_no()
-            return
-
-        if upper.startswith("EDIT:") and self.pending_email_replies:
-            self._handle_email_edit(text[5:].strip())
-            return
-
-        # Unknown command
+        # Unknown
         self.telegram.send_message(
-            "Unknown command. Type START for all options."
+            "Unknown command.\n"
+            "Type START to see all options."
         )
 
     def _handle_check(self):
-        """Process emails now."""
-        self.telegram.send_message("🔄 Processing emails now...")
-
+        """Process new emails."""
+        self.telegram.send_message("🔄 Checking for new emails...")
         try:
             orchestrator = EmailAssistantOrchestrator()
+            orchestrator.telegram = self.telegram
+
+            # Override the telegram notification in orchestrator
+            # to add replies to our queue instead
+            original_send = orchestrator._handle_reply_email
+
+            def queued_reply_handler(email, classification, stats):
+                """Add reply to queue instead of sending directly."""
+                from src.auto_replier.reply_generator import ReplyGenerator
+                gen = ReplyGenerator()
+                reply = gen.generate_reply(email, classification.model_dump())
+                self.db.store_reply_draft(email['id'], reply.model_dump())
+                stats['replies_generated'] += 1
+
+                # Add to queue
+                self.reply_queue.append({
+                    'email_id': email['id'],
+                    'email': email,
+                    'reply': reply,
+                    'type': 'email'
+                })
+                logger.info(f"Added to reply queue: {email['subject'][:40]}")
+
+            orchestrator._handle_reply_email = queued_reply_handler
+
             stats = orchestrator.run(max_emails=10, query="in:inbox")
 
-            self.telegram.send_message(
-                f"✅ Email check complete!\n\n"
+            msg = (
+                f"Email check complete!\n\n"
                 f"Processed: {stats['total']}\n"
-                f"Jobs found: {stats['job_emails']}\n"
+                f"New jobs: {stats['job_emails']}\n"
                 f"Strong matches: {stats['strong_matches']}\n"
-                f"Replies pending: {stats['replies_generated']}"
+                f"Replies queued: {len(self.reply_queue)}"
             )
+            self.telegram.send_message(msg)
+
+            # Show first pending reply if any
+            if self.reply_queue and not self.current_reply:
+                self._show_next_reply()
 
         except Exception as e:
-            self.telegram.send_message(f"❌ Error: {e}")
+            logger.error(f"Check error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            self.telegram.send_message(f"Error: {e}")
+
+    def _show_next_reply(self):
+        """Show the next reply in queue for approval."""
+        if not self.reply_queue:
+            self.telegram.send_message(
+                "All replies processed!\n"
+                "Check dashboard for job cover letters."
+            )
+            self.current_reply = None
+            return
+
+        self.current_reply = self.reply_queue.pop(0)
+        email = self.current_reply['email']
+        reply = self.current_reply['reply']
+
+        remaining = len(self.reply_queue)
+        remaining_text = f"\n({remaining} more in queue)" if remaining > 0 else ""
+
+        msg = (
+            f"REPLY APPROVAL NEEDED{remaining_text}\n\n"
+            f"To: {email.get('from', 'Unknown')[:60]}\n"
+            f"Subject: {email.get('subject', 'No Subject')[:80]}\n\n"
+            f"GENERATED REPLY:\n"
+            f"------------------\n"
+            f"{reply.body[:800]}\n"
+            f"------------------\n\n"
+            f"YES - Send this reply\n"
+            f"NO - Discard\n"
+            f"EDIT: <text> - Edit and send\n"
+            f"SKIP - Skip for now"
+        )
+        self.telegram.send_message(msg)
+
+    def _handle_yes(self):
+        """Send current reply."""
+        if not self.current_reply:
+            self.telegram.send_message("No pending reply.")
+            return
+
+        email = self.current_reply['email']
+        reply = self.current_reply['reply']
+
+        success = self.gmail.send_email(
+            to=email.get('from', ''),
+            subject=reply.subject,
+            body=reply.body,
+            thread_id=email.get('thread_id', '')
+        )
+
+        if success:
+            self.db.mark_reply_sent(self.current_reply['email_id'])
+            self.telegram.send_message(
+                f"Reply sent to {email.get('from', '')[:50]}"
+            )
+        else:
+            self.telegram.send_message("Failed to send reply.")
+
+        self.current_reply = None
+
+        # Show next in queue
+        time.sleep(1)
+        if self.reply_queue:
+            self._show_next_reply()
+        else:
+            self.telegram.send_message(
+                "All replies processed!"
+            )
+
+    def _handle_no(self):
+        """Discard current reply."""
+        if not self.current_reply:
+            self.telegram.send_message("No pending reply.")
+            return
+
+        subject = self.current_reply['email'].get('subject', '')[:40]
+        self.current_reply = None
+        self.telegram.send_message(f"Reply discarded: {subject}")
+
+        # Show next
+        time.sleep(1)
+        if self.reply_queue:
+            self._show_next_reply()
+        else:
+            self.telegram.send_message("Queue empty!")
+
+    def _handle_edit(self, new_body: str):
+        """Edit and send current reply."""
+        if not self.current_reply or not new_body:
+            self.telegram.send_message(
+                "No pending reply or empty edit text."
+            )
+            return
+
+        email = self.current_reply['email']
+        reply = self.current_reply['reply']
+        full_body = new_body + "\n\n" + settings.EMAIL_SIGNATURE
+
+        success = self.gmail.send_email(
+            to=email.get('from', ''),
+            subject=reply.subject,
+            body=full_body,
+            thread_id=email.get('thread_id', '')
+        )
+
+        if success:
+            self.db.mark_reply_sent(self.current_reply['email_id'])
+            self.telegram.send_message("Edited reply sent!")
+        else:
+            self.telegram.send_message("Failed to send.")
+
+        self.current_reply = None
+        time.sleep(1)
+
+        if self.reply_queue:
+            self._show_next_reply()
+
+    def _handle_skip(self):
+        """Skip current reply - put back in queue end."""
+        if not self.current_reply:
+            self.telegram.send_message("Nothing to skip.")
+            return
+
+        # Put at end of queue
+        self.reply_queue.append(self.current_reply)
+        self.current_reply = None
+        self.telegram.send_message("Skipped. Showing next...")
+
+        time.sleep(1)
+        self._show_next_reply()
+
+    def _handle_show_replies(self):
+        """Show pending replies count."""
+        pending = len(self.reply_queue)
+        current = "Yes" if self.current_reply else "No"
+
+        msg = (
+            f"REPLY QUEUE:\n\n"
+            f"Currently showing: {current}\n"
+            f"Waiting in queue: {pending}\n\n"
+        )
+
+        if pending > 0:
+            msg += "Queued replies:\n"
+            for i, r in enumerate(self.reply_queue[:5], 1):
+                subj = r['email'].get('subject', 'No Subject')[:40]
+                msg += f"{i}. {subj}\n"
+
+        if not self.current_reply and pending > 0:
+            msg += "\nType REPLIES to start reviewing."
+
+        self.telegram.send_message(msg)
+
+        # If nothing currently showing, show first
+        if not self.current_reply and self.reply_queue:
+            self._show_next_reply()
 
     def _handle_jobs(self):
         """Show recent job matches."""
@@ -160,159 +345,63 @@ class UnifiedBot:
             session.close()
 
             if not matches:
-                self.telegram.send_message("No job matches yet. Type CHECK to process emails.")
+                self.telegram.send_message(
+                    "No job matches yet.\nType CHECK to process emails."
+                )
                 return
 
-            msg = "💼 RECENT JOB MATCHES:\n\n"
+            msg = "RECENT JOB MATCHES:\n\n"
             for m in matches:
                 score = f"{m.match_score:.0%}" if m.match_score else "N/A"
                 emoji = "🟢" if m.match_score and m.match_score >= 0.8 else "🟡"
-                applied = "✅" if m.applied else "❌"
+                applied = "Applied" if m.applied else "Not Applied"
                 msg += (
                     f"{emoji} {m.job_title}\n"
-                    f"   at {m.company}\n"
-                    f"   Score: {score} | Applied: {applied}\n\n"
+                    f"   Company: {m.company}\n"
+                    f"   Score: {score} | {applied}\n\n"
                 )
 
+            msg += "View cover letters at dashboard: localhost:8503"
             self.telegram.send_message(msg)
 
         except Exception as e:
-            self.telegram.send_message(f"Error loading jobs: {e}")
-
-    def _handle_replies(self):
-        """Show pending reply drafts."""
-        try:
-            from src.utils.database import ReplyDraft as RD
-            session = self.db.Session()
-            drafts = session.query(RD).filter_by(
-                is_sent=False
-            ).order_by(RD.created_at.desc()).limit(5).all()
-            session.close()
-
-            if not drafts:
-                self.telegram.send_message("No pending replies.")
-                return
-
-            msg = "✍️ PENDING REPLIES:\n\n"
-            for d in drafts:
-                email = self.db.get_email(d.email_id)
-                subject = email.get("subject", "Unknown") if email else "Unknown"
-                msg += (
-                    f"- Re: {subject[:50]}\n"
-                    f"  Confidence: {d.confidence:.0%}\n\n"
-                )
-
-            msg += "View and send from dashboard: localhost:8503"
-            self.telegram.send_message(msg)
-
-        except Exception as e:
-            self.telegram.send_message(f"Error loading replies: {e}")
+            self.telegram.send_message(f"Error: {e}")
 
     def _handle_status(self):
         """Show daily stats."""
         try:
-            stats = self.db.get_daily_stats()
-
-            # Professor outreach stats
             import sqlite3
+            stats = self.db.get_daily_stats()
             conn = sqlite3.connect("data/assistant.db")
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT COUNT(*) FROM professor_outreach WHERE status='sent'"
             )
             prof_sent = cursor.fetchone()[0]
-            cursor.execute(
-                "SELECT COUNT(*) FROM professor_outreach WHERE status='pending'"
-            )
-            prof_pending = cursor.fetchone()[0]
             conn.close()
 
-            msg = f"""📊 TODAY'S STATS:
-
-📧 Emails processed: {stats['total_processed']}
-💼 Job opportunities: {stats['job_emails']}
-✍️ Replies pending: {stats['replies_pending']}
-📤 Replies sent: {stats['replies_sent']}
-📝 Applications: {stats['applications']}
-
-🎓 Professor outreach sent: {prof_sent}
-🎓 Professor outreach pending: {prof_pending}
-
-⏰ {datetime.now().strftime('%Y-%m-%d %H:%M')}
-📊 Dashboard: localhost:8503"""
-
+            msg = (
+                f"TODAY'S STATS:\n\n"
+                f"Emails processed: {stats['total_processed']}\n"
+                f"Job opportunities: {stats['job_emails']}\n"
+                f"Replies pending: {stats['replies_pending']}\n"
+                f"Replies sent: {stats['replies_sent']}\n"
+                f"Professors contacted: {prof_sent}\n"
+                f"Queue: {len(self.reply_queue)} waiting\n\n"
+                f"{datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            )
             self.telegram.send_message(msg)
 
         except Exception as e:
             self.telegram.send_message(f"Error: {e}")
 
-    def _handle_email_yes(self):
-        """Send most recent pending email reply."""
-        if not self.pending_email_replies:
-            self.telegram.send_message("No pending email replies.")
-            return
-
-        email_id = list(self.pending_email_replies.keys())[-1]
-        pending = self.pending_email_replies[email_id]
-
-        success = self.gmail.send_email(
-            to=pending['to'],
-            subject=pending['subject'],
-            body=pending['body'],
-            thread_id=pending.get('thread_id', '')
-        )
-
-        if success:
-            self.db.mark_reply_sent(email_id)
-            del self.pending_email_replies[email_id]
-            self.telegram.send_message(f"✅ Reply sent to {pending['to']}")
-        else:
-            self.telegram.send_message("❌ Failed to send.")
-
-    def _handle_email_no(self):
-        """Discard most recent pending reply."""
-        if self.pending_email_replies:
-            email_id = list(self.pending_email_replies.keys())[-1]
-            del self.pending_email_replies[email_id]
-            self.telegram.send_message("❌ Reply discarded.")
-
-    def _handle_email_edit(self, new_body: str):
-        """Edit and send email reply."""
-        if not new_body:
-            self.telegram.send_message("Provide text after EDIT:")
-            return
-
-        if not self.pending_email_replies:
-            self.telegram.send_message("No pending email replies.")
-            return
-
-        email_id = list(self.pending_email_replies.keys())[-1]
-        pending = self.pending_email_replies[email_id]
-
-        full_body = new_body + "\n\n" + settings.EMAIL_SIGNATURE
-
-        success = self.gmail.send_email(
-            to=pending['to'],
-            subject=pending['subject'],
-            body=full_body,
-            thread_id=pending.get('thread_id', '')
-        )
-
-        if success:
-            self.db.mark_reply_sent(email_id)
-            del self.pending_email_replies[email_id]
-            self.telegram.send_message(f"✅ Edited reply sent to {pending['to']}")
-        else:
-            self.telegram.send_message("❌ Failed to send.")
-
     def _auto_email_check(self):
-        """Background thread that checks emails periodically."""
+        """Background auto check."""
         interval = settings.EMAIL_CHECK_INTERVAL_MINUTES * 60
-
         while True:
             try:
                 time.sleep(interval)
-                print(f"⏰ Auto email check at {datetime.now().strftime('%H:%M')}")
+                print(f"Auto check at {datetime.now().strftime('%H:%M')}")
                 self._handle_check()
             except Exception as e:
                 logger.error(f"Auto check error: {e}")

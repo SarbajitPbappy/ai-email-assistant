@@ -56,6 +56,18 @@ class EmailAssistantOrchestrator:
 
         self.db.store_emails(emails)
 
+        # Skip already processed emails
+        processed_ids = self.get_processed_email_ids()
+        emails = [e for e in emails if e['id'] not in processed_ids]
+        
+        if not emails:
+            logger.info("All emails already processed. Nothing new.")
+            self.telegram.send_message("📭 No new emails to process.")
+            return stats
+
+        logger.info(f"New emails to process: {len(emails)}")
+        stats['total'] = len(emails)
+
         for i, email in enumerate(emails, 1):
             logger.info(f"\n{'='*40}")
             logger.info(f"Email {i}/{len(emails)}: {email['subject'][:60]}")
@@ -286,3 +298,16 @@ _Below your match threshold - no reply generated_"""
             send_email_func=send_email,
             timeout_seconds=timeout
         )
+
+
+    def get_processed_email_ids(self) -> set:
+        """Get IDs of already processed emails."""
+        session = self.db.Session()
+        try:
+            from src.utils.database import EmailRecord
+            records = session.query(EmailRecord.id).filter(
+                EmailRecord.is_processed == True
+            ).all()
+            return {r.id for r in records}
+        finally:
+            session.close()

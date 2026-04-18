@@ -2,7 +2,7 @@ import json
 from typing import Dict, Any, List
 from pydantic import BaseModel, Field
 from langchain_community.chat_models import ChatOllama
-from langchain.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate
 from config.settings import settings
 from src.utils.logger import get_logger
 from src.utils.json_parser import extract_json_from_text
