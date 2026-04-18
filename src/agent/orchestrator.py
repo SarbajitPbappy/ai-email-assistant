@@ -6,7 +6,7 @@ from src.cv_parser.cv_extractor import CVExtractor
 from src.job_matcher.matcher import JobMatcher
 from src.auto_replier.reply_generator import ReplyGenerator
 from src.auto_applier.cover_letter import CoverLetterGenerator
-from src.utils.database import Database
+from src.utils.firebase_db import FirebaseDatabase as Database
 from src.utils.logger import get_logger
 from src.utils.telegram_bot import TelegramBot
 from src.utils.link_extractor import extract_all_important_links
@@ -301,13 +301,9 @@ _Below your match threshold - no reply generated_"""
 
 
     def get_processed_email_ids(self) -> set:
-        """Get IDs of already processed emails."""
-        session = self.db.Session()
+        """Get IDs of already processed emails from Firebase."""
         try:
-            from src.utils.database import EmailRecord
-            records = session.query(EmailRecord.id).filter(
-                EmailRecord.is_processed == True
-            ).all()
-            return {r.id for r in records}
-        finally:
-            session.close()
+            docs = self.db.db.collection("emails")                .where("is_processed", "==", True)                .stream()
+            return {doc.id for doc in docs}
+        except Exception as e:
+            return set()

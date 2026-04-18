@@ -6,7 +6,7 @@ from src.agent.orchestrator import EmailAssistantOrchestrator
 from src.professor_outreach.telegram_handler import ProfessorTelegramHandler
 from src.utils.telegram_bot import TelegramBot
 from src.utils.telegram_commands import START_MESSAGE, HELP_MESSAGE
-from src.utils.database import Database
+from src.utils.firebase_db import FirebaseDatabase as Database
 from config.settings import settings
 from src.utils.logger import get_logger
 
@@ -322,7 +322,7 @@ class UnifiedBot:
         if pending > 0:
             msg += "Queued replies:\n"
             for i, r in enumerate(self.reply_queue[:5], 1):
-                subj = r['email'].get('subject', 'No Subject')[:40]
+                subj = r["email"].get("subject", "No Subject")[:40]
                 msg += f"{i}. {subj}\n"
 
         if not self.current_reply and pending > 0:
@@ -330,19 +330,13 @@ class UnifiedBot:
 
         self.telegram.send_message(msg)
 
-        # If nothing currently showing, show first
         if not self.current_reply and self.reply_queue:
             self._show_next_reply()
 
     def _handle_jobs(self):
-        """Show recent job matches."""
+        """Show recent job matches from Firebase."""
         try:
-            from src.utils.database import JobMatch
-            session = self.db.Session()
-            matches = session.query(JobMatch).order_by(
-                JobMatch.created_at.desc()
-            ).limit(5).all()
-            session.close()
+            matches = self.db.get_all_job_matches(limit=5)
 
             if not matches:
                 self.telegram.send_message(
@@ -352,13 +346,14 @@ class UnifiedBot:
 
             msg = "RECENT JOB MATCHES:\n\n"
             for m in matches:
-                score = f"{m.match_score:.0%}" if m.match_score else "N/A"
-                emoji = "🟢" if m.match_score and m.match_score >= 0.8 else "🟡"
-                applied = "Applied" if m.applied else "Not Applied"
+                score = m.get("match_score", 0)
+                score_str = f"{score:.0%}" if score else "N/A"
+                emoji = "🟢" if score >= 0.8 else "🟡"
+                applied = "Applied" if m.get("applied") else "Not Applied"
                 msg += (
-                    f"{emoji} {m.job_title}\n"
-                    f"   Company: {m.company}\n"
-                    f"   Score: {score} | {applied}\n\n"
+                    f"{emoji} {m.get('job_title','Unknown')}\n"
+                    f"   Company: {m.get('company','Unknown')}\n"
+                    f"   Score: {score_str} | {applied}\n\n"
                 )
 
             msg += "View cover letters at dashboard: localhost:8503"
@@ -368,17 +363,15 @@ class UnifiedBot:
             self.telegram.send_message(f"Error: {e}")
 
     def _handle_status(self):
-        """Show daily stats."""
+        """Show daily stats from Firebase."""
         try:
-            import sqlite3
             stats = self.db.get_daily_stats()
-            conn = sqlite3.connect("data/assistant.db")
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT COUNT(*) FROM professor_outreach WHERE status='sent'"
-            )
-            prof_sent = cursor.fetchone()[0]
-            conn.close()
+
+            # Professor outreach count
+            from src.professor_outreach.firebase_outreach import ProfessorOutreachDB
+            prof_db = ProfessorOutreachDB()
+            history = prof_db.get_history(limit=100)
+            prof_sent = sum(1 for h in history if h.get("status") == "sent")
 
             msg = (
                 f"TODAY'S STATS:\n\n"

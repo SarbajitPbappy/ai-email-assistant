@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     AUTO_REPLY_ENABLED: bool = False
     REPLY_REVIEW_MODE: bool = True
 
-    DATABASE_URL: str = "sqlite:///data/assistant.db"
+    FIREBASE_KEY_PATH: str = "config/firebase_key.json"
 
     TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_CHAT_ID: str = ""
