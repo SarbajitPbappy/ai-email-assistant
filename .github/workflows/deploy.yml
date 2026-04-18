@@ -1,0 +1,30 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Deploy to Railway
+        uses: JexusNetwork/Railway-Action@main
+        with:
+          token: ${{ secrets.RAILWAY_TOKEN }}
+          environment: production
+
+      - name: Notify Deployment
+        if: success()
+        run: |
+          echo "✅ Deployment successful!"
+          echo "Bot and Dashboard are running on Railway"
+
+      - name: Notify Deployment Failed
+        if: failure()
+        run: |
+          echo "❌ Deployment failed!"
+          echo "Check Railway dashboard for logs: https://railway.app"

@@ -50,6 +50,31 @@ STATUS   - Daily stats
 PHD/PROF <scholar URL>  - Professor outreach
 ```
 
+## 🌐 Deploy to Production
+
+Ready to deploy? **Choose your setup:**
+
+### 🥇 BEST: FREE Hybrid Setup (Recommended) ⭐
+- **Dashboard**: On Streamlit Cloud (FREE)
+- **Bot**: On your local computer (FREE)
+- **Cost**: $0/month
+- **Setup**: 10 minutes
+- **See**: [QUICK_START_HYBRID.md](QUICK_START_HYBRID.md)
+
+### 💰 Budget: DigitalOcean ($4-6/month)
+- Everything in the cloud
+- Cost: $4-6/month
+- Setup: 30 minutes
+- See: [DEPLOY_DIGITALOCEAN.md](DEPLOY_DIGITALOCEAN.md)
+
+### ⚡ Easiest Cloud: Railway ($10-20/month)
+- Everything in the cloud
+- Cost: $10-20/month
+- Setup: 5 minutes
+- See: [DEPLOY_RAILWAY.md](DEPLOY_RAILWAY.md)
+
+**👉 Quick comparison**: [DEPLOYMENT_QUICK_START.md](DEPLOYMENT_QUICK_START.md)
+
 ## 📋 From Scratch Setup (Detailed)
 
 ### 1. Prerequisites

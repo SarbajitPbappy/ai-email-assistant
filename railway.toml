@@ -1,0 +1,15 @@
+# Railway Deployment Configuration
+# This file tells Railway how to build and run your application
+
+[build]
+builder = "dockerfile"
+
+[deploy]
+# Start the Telegram bot
+startCommand = "python unified_bot.py"
+
+# Expose the dashboard port
+restartPolicyMaxRetries = 5
+
+# Health check
+healthchecks = ["http://localhost:8503"]
