@@ -1,4 +1,5 @@
 import json
+import textwrap
 from typing import Dict, Any, List
 from pydantic import BaseModel, Field
 from langchain_community.chat_models import ChatOllama
@@ -8,6 +9,57 @@ from src.utils.logger import get_logger
 from src.utils.json_parser import extract_json_from_text
 
 logger = get_logger(__name__)
+
+
+def justify_text(text: str, width: int = 72) -> str:
+    """Justify a single paragraph to a fixed column width."""
+    words = text.split()
+    lines, current_line, current_length = [], [], 0
+
+    for word in words:
+        if current_length + len(word) + len(current_line) <= width:
+            current_line.append(word)
+            current_length += len(word)
+        else:
+            lines.append(current_line)
+            current_line = [word]
+            current_length = len(word)
+    if current_line:
+        lines.append(current_line)
+
+    justified_lines = []
+    for i, line in enumerate(lines):
+        if len(line) == 1 or i == len(lines) - 1:
+            justified_lines.append(" ".join(line))
+        else:
+            total_spaces = width - sum(len(w) for w in line)
+            gaps = len(line) - 1
+            space, extra = divmod(total_spaces, gaps)
+            justified_line = ""
+            for j, word in enumerate(line[:-1]):
+                justified_line += word + " " * (space + (1 if j < extra else 0))
+            justified_line += line[-1]
+            justified_lines.append(justified_line)
+
+    return "\n".join(justified_lines)
+
+
+def justify_block(text: str, width: int = 72) -> str:
+    """Justify a full email body, preserving blank lines and list items."""
+    result = []
+    for line in text.split("\n"):
+        stripped = line.strip()
+        # Preserve blank lines, numbered lists, bullet points, and short lines
+        if (
+            not stripped
+            or stripped[0].isdigit() and stripped[1:3] in (". ", ") ")
+            or stripped.startswith(("-", "*", "•"))
+            or len(stripped) < width // 2
+        ):
+            result.append(line)
+        else:
+            result.append(justify_text(stripped, width))
+    return "\n".join(result)
 
 
 class ProfessorAnalysis(BaseModel):
@@ -120,6 +172,49 @@ Return ONLY this JSON:
             recommendation="MAYBE"
         )
 
+    def _build_publication_summary(self) -> str:
+        """Build numbered publication summary from student data."""
+        pubs = self.student.get("publications", [])
+
+        # Use pre-defined summary counts if available in student profile
+        pub_summary = self.student.get("publication_summary", {})
+        if pub_summary:
+            q1 = pub_summary.get("q1_published", 0)
+            revision = pub_summary.get("under_revision", 0)
+            conference = pub_summary.get("conference_published", 0)
+        else:
+            # Derive counts from publications list
+            q1 = sum(
+                1 for p in pubs
+                if "Q1" in p.get("journal", "") or "q1" in p.get("status", "").lower()
+            )
+            revision = sum(
+                1 for p in pubs
+                if "revision" in p.get("status", "").lower()
+            )
+            conference = sum(
+                1 for p in pubs
+                if "conference" in p.get("journal", "").lower()
+                or "proceedings" in p.get("journal", "").lower()
+                or "symposium" in p.get("journal", "").lower()
+            )
+            # Fallback: total published minus revision/conference = Q1
+            if q1 == 0:
+                published = sum(
+                    1 for p in pubs
+                    if "published" in p.get("status", "").lower()
+                    and "conference" not in p.get("journal", "").lower()
+                    and "proceedings" not in p.get("journal", "").lower()
+                )
+                q1 = published
+
+        lines = [
+            f"1. Q1 Journal: {q1} (Published)",
+            f"2. Journal under revision: {revision}",
+            f"3. Conference: {conference} (Published)",
+        ]
+        return "\n".join(lines)
+
     def generate_email(
         self,
         professor_data: Dict[str, Any],
@@ -185,19 +280,22 @@ Return ONLY this JSON:
                 f"under your supervision for {intake}"
             )
 
-        # Publications - SHORT format
-        pubs = self.student.get("publications", [])
-        pub_lines = []
-        for p in pubs:
-            status = p.get('status', '')
-            journal = p.get('journal', '')
-            title = p.get('title', '')
-            # Short version
-            pub_lines.append(f"{title[:60]}... ({journal}, {status})")
-        pubs_short = "\n".join(pub_lines[:3])
+        # Numbered publication summary
+        pubs_short = manual_publications.strip() if manual_publications.strip() \
+            else self._build_publication_summary()
 
         # Generate subject
         subject = self._generate_subject(research_areas, app_type, prof_university)
+
+        # Profile overview section
+        profile_overview = (
+            f"Here is a brief profile overview:\n\n"
+            f"B.Sc. in Computer Science and Engineering, Daffodil International University, "
+            f"Bangladesh (May 2022 – April 2026), CGPA: {self.student['cgpa']}\n"
+            f"Erasmus+ Exchange Semester, Mälardalen University, Sweden (Jan 2025 – Jun 2025)\n"
+            f"Current Position: Teaching Assistant, Department of CSE, DIU (October 2025 – Present)\n\n"
+            f"Publications:\n{pubs_short}"
+        )
 
         # Build STRICT 150-word email
         body = (
@@ -209,14 +307,14 @@ Return ONLY this JSON:
             f"{paper_line} Your work on {research_text} aligns closely with my "
             f"research in {student_research}. I am enthusiastic about contributing "
             f"to your research group.\n\n"
-            f"My publications include:\n{pubs_short}\n\n"
             f"I completed an Erasmus+ Exchange at Mälardalen University, Sweden "
             f"(Jan–Jun 2025). I have attached my CV and transcript for your reference. "
             f"I would be honored to discuss further via Zoom or Google Meet at your convenience.\n\n"
-            f"Thank you for your time and consideration."
+            f"Thank you for your time and consideration.\n\n"
+            f"{profile_overview}"
         )
 
-        full_body = body + "\n\n" + self.student["signature"]
+        full_body = justify_block(body) + "\n\n" + self.student["signature"]
 
         logger.info(f"Email generated: {subject}")
         return ProfessorEmailDraft(subject=subject, body=full_body)
