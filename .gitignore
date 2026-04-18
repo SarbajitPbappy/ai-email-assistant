@@ -16,3 +16,4 @@ logs/
 *.log
 .DS_Store
 venv/
+config/firebase_key.json
