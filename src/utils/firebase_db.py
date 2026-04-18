@@ -9,23 +9,57 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+def init_firebase():
+    """Initialize Firebase from file or Streamlit secrets."""
+    if firebase_admin._apps:
+        return
+
+    # Method 1: Local file (Mac Mini)
+    if os.path.exists("config/firebase_key.json"):
+        cred = credentials.Certificate("config/firebase_key.json")
+        firebase_admin.initialize_app(cred)
+        logger.info("Firebase initialized from local key file ✅")
+        return
+
+    # Method 2: Streamlit secrets (Cloud deployment)
+    try:
+        import streamlit as st
+        firebase_config = dict(st.secrets["firebase"])
+        # Fix private key newlines
+        firebase_config["private_key"] = firebase_config["private_key"].replace("\\n", "\n")
+        cred = credentials.Certificate(firebase_config)
+        firebase_admin.initialize_app(cred)
+        logger.info("Firebase initialized from Streamlit secrets ✅")
+        return
+    except Exception as e:
+        logger.warning(f"Streamlit secrets not available: {e}")
+
+    # Method 3: Environment variable
+    firebase_json = os.environ.get("FIREBASE_KEY_JSON")
+    if firebase_json:
+        firebase_config = json.loads(firebase_json)
+        cred = credentials.Certificate(firebase_config)
+        firebase_admin.initialize_app(cred)
+        logger.info("Firebase initialized from environment variable ✅")
+        return
+
+    raise ValueError("No Firebase credentials found!")
+
+
 class FirebaseDatabase:
     """Firebase Firestore database handler."""
 
     def __init__(self):
-        if not firebase_admin._apps:
-            cred = credentials.Certificate("config/firebase_key.json")
-            firebase_admin.initialize_app(cred)
+        init_firebase()
         self.db = firestore.client()
         logger.info("Firebase connected ✅")
 
     def store_emails(self, emails: List[Dict[str, Any]]):
         """Store emails in Firestore."""
-        batch = self.db.batch()
         for email in emails:
             ref = self.db.collection("emails").document(email['id'])
             if not ref.get().exists:
-                batch.set(ref, {
+                ref.set({
                     'id': email['id'],
                     'thread_id': email.get('thread_id', ''),
                     'from_address': email.get('from', ''),
@@ -39,7 +73,6 @@ class FirebaseDatabase:
                     'is_applied': False,
                     'fetched_at': datetime.utcnow().isoformat()
                 })
-        batch.commit()
         logger.info(f"Stored {len(emails)} emails to Firebase")
 
     def get_email(self, email_id: str) -> Optional[Dict[str, Any]]:
@@ -63,7 +96,7 @@ class FirebaseDatabase:
     def get_unclassified_emails(self) -> List[Dict[str, Any]]:
         """Get unprocessed emails."""
         docs = self.db.collection("emails")\
-            .where("is_processed", "==", False)\
+            .where(filter=firestore.FieldFilter("is_processed", "==", False))\
             .stream()
         results = []
         for doc in docs:
@@ -73,7 +106,7 @@ class FirebaseDatabase:
         return results
 
     def update_email_classification(self, email_id: str, classification: Dict):
-        """Update email with classification data."""
+        """Update email with classification."""
         self.db.collection("emails").document(email_id).update({
             'category': classification.get('category', ''),
             'importance': classification.get('importance', ''),
@@ -85,7 +118,7 @@ class FirebaseDatabase:
         })
 
     def store_job_match(self, email_id: str, match_data: Dict):
-        """Store job match result."""
+        """Store job match."""
         self.db.collection("job_matches").add({
             'email_id': email_id,
             'job_title': match_data.get('job_title', ''),
@@ -100,7 +133,7 @@ class FirebaseDatabase:
     def get_job_match(self, email_id: str) -> Optional[Dict]:
         """Get job match for email."""
         docs = self.db.collection("job_matches")\
-            .where("email_id", "==", email_id)\
+            .where(filter=firestore.FieldFilter("email_id", "==", email_id))\
             .limit(1).stream()
         for doc in docs:
             return doc.to_dict().get('match_data', {})
@@ -122,8 +155,8 @@ class FirebaseDatabase:
     def get_reply_draft(self, email_id: str) -> Optional[Dict]:
         """Get pending reply draft."""
         docs = self.db.collection("reply_drafts")\
-            .where("email_id", "==", email_id)\
-            .where("is_sent", "==", False)\
+            .where(filter=firestore.FieldFilter("email_id", "==", email_id))\
+            .where(filter=firestore.FieldFilter("is_sent", "==", False))\
             .limit(1).stream()
         for doc in docs:
             data = doc.to_dict()
@@ -137,51 +170,26 @@ class FirebaseDatabase:
 
     def mark_reply_sent(self, email_id: str):
         """Mark reply as sent."""
-        # Update reply draft
         docs = self.db.collection("reply_drafts")\
-            .where("email_id", "==", email_id)\
-            .where("is_sent", "==", False)\
+            .where(filter=firestore.FieldFilter("email_id", "==", email_id))\
+            .where(filter=firestore.FieldFilter("is_sent", "==", False))\
             .stream()
         for doc in docs:
             doc.reference.update({
                 'is_sent': True,
                 'sent_at': datetime.utcnow().isoformat()
             })
-
-        # Update email
         self.db.collection("emails").document(email_id).update({
             'is_replied': True
         })
 
     def store_cover_letter(self, email_id: str, cover_letter: str):
-        """Store cover letter for job match."""
+        """Store cover letter."""
         docs = self.db.collection("job_matches")\
-            .where("email_id", "==", email_id)\
+            .where(filter=firestore.FieldFilter("email_id", "==", email_id))\
             .limit(1).stream()
         for doc in docs:
             doc.reference.update({'cover_letter': cover_letter})
-
-    def get_all_emails(self, limit: int = 50) -> List[Dict]:
-        """Get all processed emails for dashboard."""
-        docs = self.db.collection("emails")\
-            .order_by("fetched_at", direction=firestore.Query.DESCENDING)\
-            .limit(limit).stream()
-        return [doc.to_dict() for doc in docs]
-
-    def get_all_job_matches(self, limit: int = 20) -> List[Dict]:
-        """Get all job matches for dashboard."""
-        docs = self.db.collection("job_matches")\
-            .order_by("created_at", direction=firestore.Query.DESCENDING)\
-            .limit(limit).stream()
-        return [{'id': doc.id, **doc.to_dict()} for doc in docs]
-
-    def get_all_reply_drafts(self, limit: int = 20) -> List[Dict]:
-        """Get pending reply drafts for dashboard."""
-        docs = self.db.collection("reply_drafts")\
-            .where("is_sent", "==", False)\
-            .order_by("created_at", direction=firestore.Query.DESCENDING)\
-            .limit(limit).stream()
-        return [{'id': doc.id, **doc.to_dict()} for doc in docs]
 
     def mark_job_applied(self, doc_id: str):
         """Mark job as applied."""
@@ -189,34 +197,71 @@ class FirebaseDatabase:
             'applied': True
         })
 
-    def get_daily_stats(self) -> Dict[str, Any]:
-        """Get statistics - simplified to avoid composite indexes."""
+    def get_all_emails(self, limit: int = 50) -> List[Dict]:
+        """Get all emails for dashboard."""
         try:
-            # Get all emails and filter in Python
-            all_emails = list(self.db.collection("emails").stream())
-            today = date.today().isoformat()
+            docs = self.db.collection("emails")\
+                .order_by("fetched_at", direction=firestore.Query.DESCENDING)\
+                .limit(limit).stream()
+            return [doc.to_dict() for doc in docs]
+        except Exception as e:
+            logger.error(f"Error getting emails: {e}")
+            return []
 
+    def get_all_job_matches(self, limit: int = 20) -> List[Dict]:
+        """Get all job matches."""
+        try:
+            docs = self.db.collection("job_matches")\
+                .order_by("created_at", direction=firestore.Query.DESCENDING)\
+                .limit(limit).stream()
+            return [{'id': doc.id, **doc.to_dict()} for doc in docs]
+        except Exception as e:
+            logger.error(f"Error getting job matches: {e}")
+            return []
+
+    def get_all_reply_drafts(self, limit: int = 20) -> List[Dict]:
+        """Get pending reply drafts."""
+        try:
+            docs = self.db.collection("reply_drafts")\
+                .where(filter=firestore.FieldFilter("is_sent", "==", False))\
+                .order_by("created_at", direction=firestore.Query.DESCENDING)\
+                .limit(limit).stream()
+            return [{'id': doc.id, **doc.to_dict()} for doc in docs]
+        except Exception as e:
+            logger.error(f"Error getting reply drafts: {e}")
+            return []
+
+    def get_professor_outreach(self, limit: int = 20) -> List[Dict]:
+        """Get professor outreach history."""
+        try:
+            docs = self.db.collection("professor_outreach")\
+                .order_by("created_at", direction=firestore.Query.DESCENDING)\
+                .limit(limit).stream()
+            return [{'id': doc.id, **doc.to_dict()} for doc in docs]
+        except Exception as e:
+            logger.error(f"Error getting professor outreach: {e}")
+            return []
+
+    def get_daily_stats(self) -> Dict[str, Any]:
+        """Get statistics."""
+        try:
+            today = date.today().isoformat()
+            all_emails = list(self.db.collection("emails").stream())
             total = sum(1 for e in all_emails
                        if e.to_dict().get('fetched_at', '') >= today)
-
             job_emails = sum(1 for e in all_emails
                             if e.to_dict().get('fetched_at', '') >= today
                             and e.to_dict().get('is_job_related', False))
-
-            # Reply stats
             all_replies = list(self.db.collection("reply_drafts").stream())
             replies_pending = sum(1 for r in all_replies
                                  if not r.to_dict().get('is_sent', False))
             replies_sent = sum(1 for r in all_replies
                               if r.to_dict().get('is_sent', False)
                               and r.to_dict().get('sent_at', '') >= today)
-
-            # Job applications
             all_jobs = list(self.db.collection("job_matches").stream())
             applications = sum(1 for j in all_jobs
                               if j.to_dict().get('applied', False)
                               and j.to_dict().get('created_at', '') >= today)
-
             return {
                 'total_processed': total,
                 'job_emails': job_emails,
@@ -226,29 +271,9 @@ class FirebaseDatabase:
                 'avg_match_score': 0.0
             }
         except Exception as e:
+            logger.error(f"Stats error: {e}")
             return {
-                'total_processed': 0,
-                'job_emails': 0,
-                'replies_sent': 0,
-                'replies_pending': 0,
-                'applications': 0,
-                'avg_match_score': 0.0
+                'total_processed': 0, 'job_emails': 0,
+                'replies_sent': 0, 'replies_pending': 0,
+                'applications': 0, 'avg_match_score': 0.0
             }
-
-    def get_professor_outreach(self, limit: int = 20) -> List[Dict]:
-        """Get professor outreach history."""
-        try:
-            docs = self.db.collection("professor_outreach")\
-                .order_by("created_at", direction=firestore.Query.DESCENDING)\
-                .limit(limit).stream()
-            return [{'id': doc.id, **doc.to_dict()} for doc in docs]
-        except:
-            return []
-
-    def store_professor_outreach(self, data: Dict) -> str:
-        """Store professor outreach record."""
-        ref = self.db.collection("professor_outreach").add({
-            **data,
-            'created_at': datetime.utcnow().isoformat()
-        })
-        return ref[1].id
