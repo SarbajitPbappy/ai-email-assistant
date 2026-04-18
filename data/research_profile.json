@@ -1,0 +1,150 @@
+{
+  "name": "Sarbajit Paul Bappy",
+  "email": "bappy15-6155@s.diu.edu.bd",
+  "university": "Daffodil International University",
+  "department": "Computer Science and Engineering",
+  "current_degree": "Bachelor of Science in CSE (Final Year)",
+  "cgpa": "3.94/4.00",
+  "exchange_program": "Erasmus+ Exchange at Malardalen University, Vasteras, Sweden (Jan 2025 - Jun 2025)",
+
+  "research_interests": [
+    "Deep Learning",
+    "Computer Vision",
+    "Explainable AI (XAI)",
+    "Medical Image Analysis",
+    "Agricultural Disease Detection",
+    "Hybrid Deep Learning Models",
+    "Machine Learning in Healthcare",
+    "Transfer Learning",
+    "Disease Classification",
+    "Neural Networks"
+  ],
+
+  "publications": [
+    {
+      "title": "SkinVisualNet: A Hybrid Deep Learning Approach Leveraging Explainable Models for Identifying Lyme Disease from Skin Rash Images",
+      "journal": "Machine Learning and Knowledge Extraction (MDPI)",
+      "status": "Published",
+      "year": "2025",
+      "doi": "https://doi.org/10.3390/make7040157",
+      "authors": "Sohel, A., Turjy, R.C.D., Bappy, S.P., Assaduzzaman, M., Marouf, A.A., Rokne, J.G., & Alhajj, R.",
+      "type": "Journal Paper"
+    },
+    {
+      "title": "JackVisualNet: A Fine-Tuned Hybrid Deep Learning Model for Jackfruit Disease Classification with Explainable AI",
+      "journal": "PeerJ Computer Science (Q1)",
+      "status": "Major Revision",
+      "year": "2025",
+      "doi": "",
+      "authors": "Bappy, S.P. et al.",
+      "type": "Journal Paper"
+    },
+    {
+      "title": "A Hybrid Deep Learning Approach for Identifying Jackfruit Leaf and Fruit Disease",
+      "journal": "Proceedings of IEEE CS BDC Symposium 2024, Vol. 3",
+      "status": "Published",
+      "year": "2024",
+      "doi": "",
+      "authors": "Paul, S., Turjy, R.C.D., Sohel, A.",
+      "type": "Conference Proceedings"
+    },
+    {
+      "title": "A Hybrid Deep Learning Approach for Identifying Lyme Disease from Skin Rash Images",
+      "journal": "Proceedings of IEEE CS BDC Symposium 2024, Vol. 3",
+      "status": "Published",
+      "year": "2024",
+      "doi": "",
+      "authors": "Turjy, R.C.D., Paul, S., Sohel, A.",
+      "type": "Conference Proceedings"
+    }
+  ],
+
+  "research_experience": [
+    {
+      "role": "Teaching Assistant",
+      "department": "Computer Science and Engineering",
+      "university": "Daffodil International University",
+      "supervisor": "Professor Dr. Fernaz Narin Nur",
+      "duration": "October 2025 - Present",
+      "description": "Assisting in undergraduate courses, laboratory sessions, coursework evaluation, and providing academic and research support"
+    },
+    {
+      "role": "Researcher",
+      "lab": "Health Informatics Research Lab (HIRL)",
+      "university": "Daffodil International University",
+      "duration": "2024 - Present",
+      "description": "Research on disease detection from medical and agricultural images using deep learning and explainable AI"
+    }
+  ],
+
+  "projects": [
+    "Rainfall and Temperature Prediction using ML for climate and agriculture forecasting",
+    "Population Analysis with MySQL for demographic insights",
+    "Email Spam Classification using Random Forest and Decision Trees"
+  ],
+
+  "leadership": [
+    "Vice Chair (Technical), IEEE DIU SB CS Chapter (2024-2025)",
+    "Secretary, IEEE DIU SB WIE Affinity Group (2024-2025)",
+    "Campus Organizer, Brikkhobondhu (2024)"
+  ],
+
+  "awards": [
+    "Erasmus+ ICM Exchange Scholarship, Malardalen University, Sweden (2025)",
+    "29th Position, Take Off Programming Contest (2022)",
+    "Regional Winner, Jatiyo Shishu Kishore Quiz Utsav (2016)",
+    "Regional Winner, National Creative Talent Hunt Competition (2013-2016)"
+  ],
+
+  "skills": {
+    "programming": ["Python", "C", "C++", "SQL", "HTML", "JavaScript"],
+    "ml_dl": ["TensorFlow", "Keras", "Scikit-Learn", "OpenCV", "PyTorch"],
+    "tools": ["Git", "GitHub", "Jupyter Notebook", "Pandas", "NumPy", "Matplotlib", "VS Code", "LaTeX"],
+    "research_tools": ["Covidence", "SPSS", "LaTeX"]
+  },
+
+  "certifications": [
+    "Supervised Machine Learning: Regression and Classification - Andrew Ng, Coursera/DeepLearning.AI (2023-2024)",
+    "CSE Fundamental - Phitron.io (2022-2024) - DSA, OOP, DBMS, AWS, ML"
+  ],
+
+  "references": [
+    {
+      "name": "Dr. Fernaz Narin Nur",
+      "title": "Professor",
+      "department": "Computer Science and Engineering",
+      "university": "Daffodil International University",
+      "email": "fernaz.cse@diu.edu.bd"
+    },
+    {
+      "name": "Amir Sohel",
+      "title": "Assistant Professor",
+      "department": "Computer Science and Engineering",
+      "university": "Daffodil International University",
+      "email": "amir.cse@diu.edu.bd"
+    }
+  ],
+
+  "preferred_research_areas_for_phd": [
+    "Explainable AI in Medical Imaging",
+    "Computer Vision for Healthcare",
+    "Deep Learning for Disease Detection",
+    "Hybrid Deep Learning Models",
+    "AI in Agricultural Disease Classification"
+  ],
+
+  "preferred_research_areas_for_masters": [
+    "Machine Learning",
+    "Computer Vision",
+    "AI in Healthcare",
+    "Explainable AI",
+    "Deep Learning"
+  ],
+
+  "statement_of_purpose": "I am a final-year Computer Science and Engineering student at Daffodil International University (CGPA: 3.94/4.00) with an Erasmus+ exchange experience at Malardalen University, Sweden. My research focuses on deep learning, computer vision, and explainable AI with applications in healthcare and agriculture. I have a published journal paper in Machine Learning and Knowledge Extraction (MDPI) on Lyme disease detection using hybrid deep learning, another paper under major revision at PeerJ Computer Science (Q1) on jackfruit disease classification with XAI, and two IEEE conference proceedings. As a Teaching Assistant under Professor Dr. Fernaz Narin Nur and a researcher at the Health Informatics Research Lab, I am deeply committed to impactful research. I am seeking a graduate position where I can advance my expertise in explainable AI and medical image analysis under expert supervision.",
+
+  "cv_path": "data/my_cv.pdf",
+  "transcript_path": "data/transcript.pdf",
+
+  "signature": "Best regards,\nSarbajit Paul Bappy\nUndergraduate Student & Teaching Assistant\nDepartment of Computer Science and Engineering\nDaffodil International University, Dhaka, Bangladesh\n📧 bappy15-6155@s.diu.edu.bd\n📞 +880 1315352270\n🌐 github.com/SarbajitPbappy | LinkedIn: iamsarbajit (linkedin.com/in/iamsarbajit) | Portfolio: sarbajit-bappy.vercel.app"
+}
