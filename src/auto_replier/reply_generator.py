@@ -46,7 +46,8 @@ class ReplyGenerator:
             model="gemini-2.0-flash",
             google_api_key=settings.GOOGLE_API_KEY
         )
-        self.signature = settings.EMAIL_SIGNATURE
+        # Fix literal \n from .env into real newlines
+        self.signature = settings.EMAIL_SIGNATURE.replace('\\n', '\n')
 
     def _build_prompt(self):
         return ChatPromptTemplate.from_messages([
@@ -105,7 +106,6 @@ Output JSON only:""")
             raw = response.content if hasattr(response, 'content') else str(response)
             data = extract_json_from_text(raw)
             if data and data.get('body'):
-                # Add signature
                 data['body'] = self._add_signature(data['body'])
                 result = ReplyDraft(**data)
                 logger.info(f"Reply generated | Confidence: {result.confidence:.0%}")
@@ -128,7 +128,7 @@ Output JSON only:""")
 
         # Fallback
         subject = email_data.get('subject', '')
-        fallback_body = f"Thank you for your email. I will get back to you shortly."
+        fallback_body = "Thank you for your email. I will get back to you shortly."
         return ReplyDraft(
             subject=f"Re: {subject}",
             body=self._add_signature(fallback_body),

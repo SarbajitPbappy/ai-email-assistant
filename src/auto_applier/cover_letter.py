@@ -21,6 +21,8 @@ class CoverLetterGenerator:
             google_api_key=settings.GOOGLE_API_KEY
         )
         self.cv_extractor = CVExtractor()
+        # Fix literal \n from .env into real newlines
+        self.signature = settings.EMAIL_SIGNATURE.replace('\\n', '\n')
 
     def generate(
         self,
@@ -75,17 +77,20 @@ Job Description:
         try:
             logger.info("Generating cover letter with Ollama...")
             result = (prompt | self.ollama).invoke(chain_input)
+            content = result.content
             logger.info("Cover letter generated successfully")
-            return result.content
+            return f"{content}\n\n{self.signature}"
         except Exception as e:
             logger.warning(f"Ollama failed: {e}. Using Gemini...")
             try:
                 result = (prompt | self.gemini).invoke(chain_input)
-                return result.content
+                content = result.content
+                return f"{content}\n\n{self.signature}"
             except Exception as e2:
                 logger.error(f"Cover letter generation failed: {e2}")
-                return (
+                fallback = (
                     f"Dear Hiring Manager,\n\n"
                     f"I am writing to express my interest in {job_title} at {company}.\n\n"
                     f"Best regards,\n{profile.name}"
                 )
+                return f"{fallback}\n\n{self.signature}"
